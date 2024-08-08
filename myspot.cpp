@@ -34,7 +34,7 @@ class image_representation {
     bool is_null;
 
     public:
-    image_representation() : is_null(1), width(0), height(0) {};
+    image_representation() : width(0), height(0), is_null(1) {};
 
     image_representation(const std::string& tlink, const int& twidth, const int& theight) {
         if(link == "") is_null = 1;
@@ -59,8 +59,8 @@ struct artist_data {
     // public:                     //temporary public for debugging
     std::string id, url, name;
     std::vector<std::string> genres;
-    int64_t follower;
-    int8_t popularity;
+    long long follower;         //long long to suppress System-V's int64_t defined as sign long, gerenate warning to scanf/printf
+    int32_t popularity;
     image_representation image;
 
     public:
@@ -84,14 +84,15 @@ struct artist_data {
 
     std::string get_id() const {return id;}
     std::string get_url() const {return url;}
-    std::string get_name() const {return url;}
+    std::string get_name() const {return name;}
     std::vector<std::string> get_genres() const {return genres;}
-    int64_t get_follower() const {return follower;}
-    int8_t get_popularity() const {return popularity;}
+    long long get_follower() const {return follower;}
+    int32_t get_popularity() const {return popularity;}
     image_representation get_image() const {return image;}
 };
 
 size_t onetime_post_response(char *ptr, size_t charsz, size_t strsz, void *_stdstringret) {
+    (void) charsz;  //set unused
     *((string*)  _stdstringret) = std::string(ptr, strsz);
     return strsz;
 }
@@ -112,59 +113,8 @@ std::string translate_curl_error(const CURLcode& code) {
     return std::string("curl failed, error ") + curl_easy_strerror(code);
 }
 
-//Return 1 if success, 0 if fail. Pass std::string pointer for more detail.
-//Pointer can be null if omitted 
-int get_artist_oldcall(string artist_id, artist_data& retdata, std::string *error_string) {
-    CURLcode res;
-    std::string response_string;
-    long response_code;
-    json parsed_json;
-
-    std::string tmp = append_api_artist_url(artist_id);
-    curl_easy_setopt(curl, CURLOPT_URL, tmp.c_str());
-    //Prepare header
-    curl_slist *headerlist = NULL;
-    headerlist = curl_slist_append(NULL, prepare_authorized_header().c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerlist);
-    curl_easy_setopt(curl, CURLOPT_POST, 0);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onetime_post_response);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
-    
-    res = curl_easy_perform(curl);
-    if(res != CURLE_OK) {
-        if(error_string != NULL) *error_string = translate_curl_error(res);
-        return 0;
-    }
-
-    res = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-    curl_slist_free_all(headerlist);
-
-    if(error_string != NULL) {
-        switch(response_code) {
-            case 200:
-            *error_string = "HTTP OK";
-            break;
-            case 401:
-            *error_string = "HTTP Unauthorize";
-            break;
-            case 403: 
-            *error_string = "HTTP Bad OAuth request";
-            break;
-            case 404: 
-            *error_string = "HTTP Resource not found";
-            break;
-            case 429: 
-            *error_string = "HTTP Rate limit exceeded";
-            break;
-        }
-    }
-    if(response_code != 200) return 0; 
-    parsed_json = json::parse(response_string);
-    retdata = artist_data(parsed_json);
-    return 1;
-}
-
-//POST wrapper
+//GET annd POST wrapper
+//@param post_or_get 1 for post, 0 for get
 //@param url url to POST to. URL could have body embed
 //@param header_override Override the default Content-Type: application/x-www-form-urlencoded header. 
 //Pass an empty vector for no override
@@ -172,7 +122,7 @@ int get_artist_oldcall(string artist_id, artist_data& retdata, std::string *erro
 //@param response Response of the request
 //@param error_string Pointer for error description. Pass NULL if omitted
 //@return The HTTP status code. -1 if fail to make any request
-int inapp_post(const std::string& url, const std::vector<std::string>& header_override, const std::string& post_field, std::string& response, std::string *error_string) {
+int inapp_post_or_get(int post_or_get, const std::string& url, const std::vector<std::string>& header_override, const std::string& post_field, std::string& response, std::string *error_string) {
     int response_code;
     curl_slist *headerlist = NULL;
     bool do_header_override = header_override.size() > 0 ? 1 : 0;
@@ -187,7 +137,7 @@ int inapp_post(const std::string& url, const std::vector<std::string>& header_ov
     }
     if(post_field.size() > 0) curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_field.c_str());
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_POST, 0);
+    curl_easy_setopt(curl, CURLOPT_POST, post_or_get);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onetime_post_response);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     
@@ -227,11 +177,19 @@ int inapp_post(const std::string& url, const std::vector<std::string>& header_ov
     return response_code;
 }
 
+int inapp_post(const std::string& url, const std::vector<std::string>& header_override, const std::string& post_field, std::string& response, std::string *error_string) {
+    return inapp_post_or_get(1, url, header_override, post_field, response, error_string);
+}
+
+int inapp_get(const std::string& url, const std::vector<std::string>& header_override, const std::string& post_field, std::string& response, std::string *error_string) {
+    return inapp_post_or_get(0, url, header_override, post_field, response, error_string);
+}
+
 //Return 1 if success, 0 if fail. Pass std::string pointer for more detail.
 //Pointer can be null if omitted 
 int get_artist(const string& artist_id, artist_data& retdata, std::string *error_string) {
     std::string response_string;
-    int postcode = inapp_post(append_api_artist_url(artist_id), {prepare_authorized_header()}, "", response_string, error_string);
+    int postcode = inapp_get(append_api_artist_url(artist_id), {prepare_authorized_header()}, "", response_string, error_string);
     if(postcode != 200) return 0;
 
     json parsed_json = json::parse(response_string);
@@ -316,9 +274,9 @@ std::string proceed_sha256_hashstring(const std::string& str) {
 //EVP_EncodeInit require alignment... would try later 
 //nvm it works
 std::string proceed_url_safe_base64(const string& str) {
-    int expectedOutputSize = 4*((str.length()+2)/3);
+    int expectedOutputSize = 4*int((str.length()+2)/3);
     unsigned char *buf = (unsigned char*) malloc(expectedOutputSize+1);
-    int outputSize = EVP_EncodeBlock(buf, (unsigned char*) str.c_str(), str.length());
+    int outputSize = EVP_EncodeBlock(buf, (const unsigned char*) str.c_str(), (int) str.length());
     if(outputSize != expectedOutputSize) {  
         stringstream ss;
         ss << "whoops expected output size did not match actual output size, " << expectedOutputSize << " != " << outputSize;
@@ -476,7 +434,7 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
     });
     fprintf(stderr, "[OK] socket listening\n");
 
-    const int tcp_read_max = 1536;
+    const size_t tcp_read_max = 1536;
     char tcp_data[tcp_read_max+3];
     memset(tcp_data, 0, tcp_read_max+3);    //auto null-terminated
     std::string storemore;
@@ -491,7 +449,7 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
     fprintf(stderr, "[OK] connection accepted!\n");
 
     do {
-        readcnt = read(connectfile, tcp_data, tcp_read_max);
+        readcnt = (int) read(connectfile, tcp_data, tcp_read_max);
         // fprintf(stderr, "RECEIVED DATA BEGIN\n##################\n%s################\nRECEIVED DATA END\n", tcp_data);
         if(readcnt == -1) {
             perror("[ERROR] Fail to read connection");
@@ -506,7 +464,7 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
 
     //Proceed
     int auth_ret_code = proceed_user_auth_response(storemore, generated_state, code_or_error, state);
-    const char *http_resp;
+    const char *http_resp = NULL;
     size_t http_resp_len = 0;
     switch(auth_ret_code) {
         case 1: http_resp = http_res_success; http_resp_len = sizeof(http_res_success); break;
@@ -515,7 +473,7 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
         case -3: http_resp = http_res_userfail; http_resp_len = sizeof(http_res_userfail); break;
     }
 
-    writecnt = write(connectfile, http_resp, http_resp_len);
+    writecnt = (int) write(connectfile, http_resp, http_resp_len);
     ultra_handler(writecnt, "fail to write back", ([&connectfile, &socketfile](){
         close(connectfile);
         close(socketfile);
@@ -532,7 +490,7 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
     close(connectfile);
     close(socketfile);
 
-    return 0;
+    return auth_ret_code;
 }
 
 std::string prepare_authorization_pkce_token_request(const std::string& auth_code, const std::string& code_verifier) {
@@ -549,9 +507,13 @@ int main() {
     std::string code_verifier = prepare_code_verifier(64);
     std::string generated_state;
     string authorization_url = prepare_authorization_pkce(code_verifier, generated_state);
-    // cout << authorization_url << "\n";
-    // return -1;
+    std::string error_string;
+
     int tret;
+    std::string postres;
+    json parsed_json;
+
+    curl = curl_easy_init();
 
     #ifdef __linux__ 
         tret = system( (std::string("xdg-open \"") + authorization_url + '\"').c_str() );
@@ -575,48 +537,47 @@ int main() {
         #error Platform not supported
     #endif
 
-    int retcode;
     std::string auth_code_to_xchg, ret_state;
-    retcode = http_server_listen(generated_state, auth_code_to_xchg, ret_state);
+    tret = http_server_listen(generated_state, auth_code_to_xchg, ret_state);
+    if(tret == -1 || tret == -3) fprintf(stderr, "[ERROR] HTTP server listen fail. Panic!\n");
+    else if(tret == 0) fprintf(stderr, "[INFO] User did not authorized. Terminating\n");
+    else if(tret == -2) fprintf(stderr, "[ERROR] Authorization state has been tampered! Panic!\n");
+    else if(tret == 1) {
+        if(curl) {
+            //Request token 
+            string tmp = prepare_authorization_pkce_token_request(auth_code_to_xchg, code_verifier);
+            tret = inapp_post("https://accounts.spotify.com/api/token", {}, tmp.c_str(), postres, &error_string);
+            if(tret == 200) {
+                parsed_json = json::parse(postres);
+                token = parsed_json.at("access_token");
+                refresh_token = parsed_json.at("refresh_token");
+                fprintf(stderr, "[OK] Tokens obtained!\n");
 
-    std::string postres;
-    json parsed_json;
+                char artist_id[501];
+                strcpy(artist_id, "1vCWHaC5f2uS3yhpwWbIA6");
+                
+                //artist data example: Avicii
+                artist_data ad;
+                if(get_artist(std::string(artist_id), ad, &error_string)) {
+                    fprintf(stderr, "Artist name: %s. Follower: %lld. Popularity: %d\nGenres: ", ad.get_name().c_str(), ad.get_follower(), ad.get_popularity());
+                    for(auto& s:ad.get_genres()) fprintf(stderr, "%s, ", s.c_str());
+                    fprintf(stderr, "\n[INFO] END Aviici profile example\n");
+                } else {
+                    fprintf(stderr, "get_artist failed, error string: %s\n", error_string.c_str());
+                }
 
-    curl = curl_easy_init();
-    if(curl) {
-        //Request token 
-        curl_easy_setopt(curl, CURLOPT_URL, "https://accounts.spotify.com/api/token");
-        string tmp = prepare_authorization_pkce_token_request(auth_code_to_xchg, code_verifier);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, tmp.c_str());
-        curl_easy_setopt(curl, CURLOPT_POST, 1);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onetime_post_response);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &postres);
-        curlres = curl_easy_perform(curl);
+                tret = inapp_get(API_ENDPOINT(me), {prepare_authorized_header()}, "", postres, NULL);
+                parsed_json = json::parse(postres);
+                std::string urname = parsed_json.at("display_name");
+                printf("Ur Spotify account name: %s\n", urname.c_str());
+            } else {
+                fprintf(stderr, "[ERROR] Fail to request token (user authorized). Err %s\n", error_string.c_str());
+            }
 
-        curlres = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &retcode);
-        fprintf(stderr, "Auth ret code: %d\n", retcode);
-
-        parsed_json = json::parse(postres);
-        token = parsed_json.at("access_token");
-        refresh_token = parsed_json.at("refresh_token");
-
-        char artist_id[501];
-        strcpy(artist_id, "5Pb27ujIyYb33zBqVysBkj");
-        
-        artist_data ad;
-        std::string error_string;
-        if(get_artist(std::string(artist_id), ad, &error_string)) {
-            puts("sus");
+            curl_easy_cleanup(curl);
         } else {
-            printf("function fail, error string: %s\n", error_string.c_str());
+            fputs("[ERROR] cURL init failed. Panic!\n", stderr);
         }
-
-        retcode = inapp_post(API_ENDPOINT(me), {prepare_authorized_header()}, "", postres, NULL);
-        parsed_json = json::parse(postres);
-        std::string urname = parsed_json.at("display_name");
-        printf("Ur Spotify account name: %s\n", urname.c_str());
-
-        curl_easy_cleanup(curl);
     }
 
     return 0;
