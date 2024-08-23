@@ -2,6 +2,8 @@
 //otherwise use client credentials only
 //market availablity not implemented
 
+// #include "myspot.hpp"
+
 #include <bits/stdc++.h>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -78,17 +80,17 @@ class multipage_query {
 
     //return 0 if fail, 1 if success and internal state modified
     int load_prev_tracks_page(json& return_json) {
-
+        return 0;
     }
 
     //return 0 if fail, 1 if success and internal state modified
     int load_next_tracks_page(json& return_json) {
-        
+        return 0;
     }
 
     //return 0 if fail, 1 if success and internal state modified
     int load_current_tracks_page(json& return_json) {
-        
+        return 0;
     }
 };
 
@@ -226,7 +228,7 @@ class simplified_track_data {
     }
 
     int query_audio_feature() {
-
+        return 0;
     }
 
     const std::string& get_id() const {return id;}
@@ -240,34 +242,6 @@ class simplified_track_data {
     const std::string& get_restrictions() const {return restrictions;}
     const std::string& get_preview_url() const {return preview_url;}
     const audio_feature_data& get_audio_feature() const {return audio_feature;}
-};
-
-class track_data : public simplified_track_data {
-    private:
-    std::string isrc_id, ean_id, upc_id;
-    int32_t popularity;
-    simplified_album_data album;
-
-    public:
-    track_data() {};
-    track_data(const json& pjson) {
-        set_data(pjson);
-    };
-
-    void set_data(const json& pjson) {
-        simplified_track_data::set_data(pjson);
-        album.set_data(pjson.at("album"));
-        popularity = pjson.at("popularity");
-        isrc_id = pjson.at("external_ids").contains("isrc") ? pjson.at("external_ids").at("isrc") : "";
-        ean_id = pjson.at("external_ids").contains("ean") ? pjson.at("external_ids").at("ean") : "";
-        upc_id = pjson.at("external_ids").contains("upc") ? pjson.at("external_ids").at("upc") : "";
-    }
-
-    const std::string& get_isrc() const {return isrc_id;}
-    const std::string& get_ean() const {return ean_id;}
-    const std::string& get_upc() const {return upc_id;}
-    const int32_t& get_popularity() const {return popularity;}
-    const simplified_album_data& get_album_appear_on() const {return album;}
 };
 
 class simplified_album_data {
@@ -316,6 +290,34 @@ class simplified_album_data {
     const std::string& get_restrictions() const {return restrictions;}
     const image_representation& get_image() const {return image;}
     const std::string& get_release_date() const {return release_date;}   //fix later
+};
+
+class track_data : public simplified_track_data {
+    private:
+    std::string isrc_id, ean_id, upc_id;
+    int32_t popularity;
+    simplified_album_data album;
+
+    public:
+    track_data() {};
+    track_data(const json& pjson) {
+        set_data(pjson);
+    };
+
+    void set_data(const json& pjson) {
+        simplified_track_data::set_data(pjson);
+        album.set_data(pjson.at("album"));
+        popularity = pjson.at("popularity");
+        isrc_id = pjson.at("external_ids").contains("isrc") ? pjson.at("external_ids").at("isrc") : "";
+        ean_id = pjson.at("external_ids").contains("ean") ? pjson.at("external_ids").at("ean") : "";
+        upc_id = pjson.at("external_ids").contains("upc") ? pjson.at("external_ids").at("upc") : "";
+    }
+
+    const std::string& get_isrc() const {return isrc_id;}
+    const std::string& get_ean() const {return ean_id;}
+    const std::string& get_upc() const {return upc_id;}
+    const int32_t& get_popularity() const {return popularity;}
+    const simplified_album_data& get_album_appear_on() const {return album;}
 };
 
 class album_data : public simplified_album_data {
@@ -425,6 +427,28 @@ class private_user_data : public user_data {
     const bool& get_explicit_filter_on() const {return explicit_filter_on;}
 };
 
+class playlist_track_data {
+    std::string added_time;
+    user_data added_user;
+    track_data item;
+    bool is_track;
+
+    public:
+    playlist_track_data() = default;
+    playlist_track_data(const json& pjson) {
+        set_data(pjson);
+    }
+
+    void set_data(const json& pjson) {
+        added_time = pjson.at("added_at");
+        added_user = user_data(pjson.at("added_by"));
+        if(pjson.at("track").at("type") == "track") {
+            is_track = 1;
+            item = track_data(pjson.at("track"));
+        } else is_track = 0;
+    }
+};
+
 class simplified_playlist_data {
     bool is_collab, is_public;
     std::string description, snapshot_id;
@@ -472,28 +496,6 @@ class playlist_data : public simplified_playlist_data {
         for(auto& ele : pjson.at("tracks").at("items")) {
             items.push_back(playlist_track_data(ele));
         }
-    }
-};
-
-class playlist_track_data {
-    std::string added_time;
-    user_data added_user;
-    track_data item;
-    bool is_track;
-
-    public:
-    playlist_track_data() = default;
-    playlist_track_data(const json& pjson) {
-        set_data(pjson);
-    }
-
-    void set_data(const json& pjson) {
-        added_time = pjson.at("added_at");
-        added_user = user_data(pjson.at("added_by"));
-        if(pjson.at("track").at("type") == "track") {
-            is_track = 1;
-            item = track_data(pjson.at("track"));
-        } else is_track = 0;
     }
 };
 
@@ -561,7 +563,7 @@ struct recommendations_query_data {
         //integer value would be -1
         memset(this, -1, sizeof(*this));
     };
-}
+};
 
 
 size_t onetime_post_response(char *ptr, size_t charsz, size_t strsz, void *_stdstringret) {
@@ -584,7 +586,7 @@ std::string append_url_field(std::string url, const std::vector<std::pair<std::s
         std::string firststr, secondstr;
         for(auto& c:ele.first) {
             if(isspace(c)) {    //change whitespace to +
-                c = '+';
+                firststr += '+';
             } else if(isalnum(c)) {
                 firststr += c;
             } else {
@@ -594,11 +596,15 @@ std::string append_url_field(std::string url, const std::vector<std::pair<std::s
             }
         }
         for(auto& c:ele.second) {
-            if(!isalnum(c)) {
+            if(isspace(c)) {    //change whitespace to +
+                secondstr += '+';
+            } else if(isalnum(c)) {
+                secondstr += c;
+            } else {
                 char tbuf[10];
                 sprintf(tbuf, "%%%02x", c);
                 secondstr += std::string(tbuf);
-            } else secondstr += c;
+            }
         }
         url = url + ele.first + '=' + ele.second + '&';
     }
@@ -916,7 +922,7 @@ int get_track_feature(const std::string& track_id, audio_feature_data& retdata, 
 }
 
 int get_user_recommendations(const int& limit, const std::string& market, const std::vector<std::string>& seed_artists, const std::vector<std::string>& seed_genres, const std::vector<std::string>& seed_tracks, const recommendations_query_data& rcm, std::vector<track_data>& retvec, std::string *error_string) {
-    
+    return -1;
 }
 
 int get_current_user_profile(private_user_data& userdata, std::string *error_string) {
@@ -990,13 +996,14 @@ int get_current_user_top_artists(const std::string& time_range_str, const int& l
 }
 
 //ew
-int get_followed_artists(const std::string& request_id_after, const int& limit, std::vector<artist_data>& retvec, multipage_query& next_query, std::string *error_string) {
+int get_current_user_followed_artists(const std::string& request_id_after, const int& limit, std::vector<artist_data>& retvec, multipage_query& next_query, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(me/following);
+    return -1;
 }
 
 //ew
-int check_followed_artists(const std::vector<std::string>& artists_id, std::vector<bool>& retvec, std::string *error_string) {
+int check_current_user_followed_artists(const std::vector<std::string>& artists_id, std::vector<bool>& retvec, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(me/following/contains?type=artist&);
     if(artists_id.size() == 0) {
@@ -1018,7 +1025,7 @@ int check_followed_artists(const std::vector<std::string>& artists_id, std::vect
 }
 
 //ew
-int check_followed_users(const std::vector<std::string>& users_id, std::vector<bool>& retvec, std::string *error_string) {
+int check_current_user_followed_users(const std::vector<std::string>& users_id, std::vector<bool>& retvec, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(me/following/contains?type=user&);
     if(users_id.size() == 0) {
@@ -1043,7 +1050,7 @@ int check_followed_users(const std::vector<std::string>& users_id, std::vector<b
 //@param playlist_id Playlist id
 //@param error_string Pass C++ string pointer for extra error message 
 //@return -1 if fail. 0 if token expired and should reauthenticate. 10 if return true and -10 for false
-int check_followed_playlist(const std::string& playlist_id, std::string *error_string) {
+int check_current_user_followed_playlist(const std::string& playlist_id, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(playlists/) + playlist_id + "/followers/contains";
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
@@ -1064,7 +1071,7 @@ int get_playlist(const std::string& playlist_id, const std::string& market, cons
         json parsed_json = json::parse(response_string);
         retdata.set_data(parsed_json);
         next_query = multipage_query(parsed_json.at("tracks"));
-        return 1
+        return 1;
     }
     return -1;
 }
@@ -1143,7 +1150,7 @@ int get_featured_playlists(const std::string& locale_str, const int& limit, cons
     std::string response_string;
     std::string api_url = API_ENDPOINT(browse/featured-playlists);
     std::vector<std::pair<std::string, std::string>> fieldvec {
-        make_pair("locale", locale_str);
+        make_pair("locale", locale_str),
         make_pair("limit", std::to_string(limit)),
         make_pair("offset", std::to_string(offset)),
     };
@@ -1190,20 +1197,20 @@ int get_category_playlists_ez(const std::string& category_str, const int& limit,
 }
 
 //Strict version require properly fetched category object
-int get_category_playlists(const category_data& category, const int& limit, const int& offset, std::vector<simplified_playlist_data>& retvec, multipage_query& next_query, std::string *error_string) {
-    return get_category_playlists_ez(category.get_name(), limit, offset, retvec, next_query, error_string);
+int get_category_playlists(const category_data& category, const int& limit, const int& offset, std::vector<simplified_playlist_data>& retvec, std::string& localized_message, multipage_query& next_query, std::string *error_string) {
+    return get_category_playlists_ez(category.get_name(), limit, offset, retvec, localized_message, next_query, error_string);
 }
 
 //ew
 int get_playlist_cover_image(const std::string& playlist_id, image_representation& retdata, std::string *error_string) {
-
+    return -1;
 }
 
 int get_multiple_categories(const std::string& locale_str, const int& limit, const int& offset, std::vector<category_data>& retvec, multipage_query& next_query, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(browse/categories);
     std::vector<std::pair<std::string, std::string>> fieldvec {
-        make_pair("locale", locale_str);
+        make_pair("locale", locale_str),
         make_pair("limit", std::to_string(limit)),
         make_pair("offset", std::to_string(offset)),
     };
@@ -1243,7 +1250,7 @@ int get_category(const std::string& category_id, const std::string& locale_str, 
 
 //ew
 int get_available_market(std::vector<std::string>& retvec, std::string *error_string) {
-
+    return -1;
 }
 
 //no podcast, show, audiobook support
@@ -1253,7 +1260,7 @@ int search_for_item(const std::string& query_str, const std::vector<std::string>
     std::string response_string;
     std::string api_url = API_ENDPOINT(search/);
     std::vector<std::pair<std::string, std::string>> fieldvec {
-        make_pair("q", query_str);
+        make_pair("q", query_str),
         make_pair("limit", std::to_string(limit)),
         make_pair("offset", std::to_string(offset)),
     };
