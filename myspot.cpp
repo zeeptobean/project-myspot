@@ -10,11 +10,14 @@
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 
+#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+#define internal_unix_based
 #include <sys/socket.h>
 #include <netinet/in.h>
-
-#ifdef _WIN32
+#elif defined(_WIN32)
 #include <windows.h>
+#else
+#error platform not supported!
 #endif
 
 using namespace std;
@@ -565,6 +568,13 @@ struct recommendations_query_data {
     };
 };
 
+int internal_closesocket(int socket) {
+    #ifdef internal_unix_based
+    return close(socket);
+    #else
+    return closesocket(socket);
+    #endif
+}
 
 size_t onetime_post_response(char *ptr, size_t charsz, size_t strsz, void *_stdstringret) {
     (void) charsz;  //set unused
@@ -1505,14 +1515,14 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
         socketfile = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
         if(socketfile == -1) {
             perror("Fail to init socket");
-            close(socketfile);
+            internal_closesocket(socketfile);
         } else break;
     }
     fprintf(stderr, "[OK] Successfully init socket\n");
 
         //set reusable
     int setsockopt_opt = 1;
-    setsockopt(socketfile, SOL_SOCKET, SO_REUSEADDR, &setsockopt_opt, sizeof(setsockopt_opt));
+    setsockopt(socketfile, SOL_SOCKET, SO_REUSEADDR, (const char*) &setsockopt_opt, sizeof(setsockopt_opt));
 
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
@@ -1521,13 +1531,13 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
     sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
     ultra_handler(bind(socketfile, (sockaddr*) &sa, sizeof(sa)), NULL, [&socketfile](){
-        close(socketfile);
+        internal_closesocket(socketfile);
         return -1;
     });
     fprintf(stderr, "[OK] socket binded\n");
 
     ultra_handler(listen(socketfile, 5), NULL, [&socketfile](){
-        close(socketfile);
+        internal_closesocket(socketfile);
         return -1;
     });
     fprintf(stderr, "[OK] socket listening\n");
@@ -1547,12 +1557,12 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
     fprintf(stderr, "[OK] connection accepted!\n");
 
     do {
-        readcnt = (int) read(connectfile, tcp_data, tcp_read_max);
+        readcnt = (int) recv(connectfile, tcp_data, tcp_read_max, 0);
         // fprintf(stderr, "RECEIVED DATA BEGIN\n##################\n%s################\nRECEIVED DATA END\n", tcp_data);
         if(readcnt == -1) {
             perror("[ERROR] Fail to read connection");
-            close(connectfile);
-            close(socketfile);
+            internal_closesocket(connectfile);
+            internal_closesocket(socketfile);
             // return -1;
         }
         storemore += std::string(tcp_data, readcnt);
@@ -1571,22 +1581,23 @@ int http_server_listen(const std::string& generated_state, std::string& code_or_
         case -3: http_resp = http_res_userfail; http_resp_len = sizeof(http_res_userfail); break;
     }
 
-    writecnt = (int) write(connectfile, http_resp, http_resp_len);
+    writecnt = (int) send(connectfile, http_resp, http_resp_len, 0);
     ultra_handler(writecnt, "fail to write back", ([&connectfile, &socketfile](){
-        close(connectfile);
-        close(socketfile);
+        internal_closesocket(connectfile);
+        internal_closesocket(socketfile);
         return -1;
     }));
     fprintf(stderr, "[OK] Successfully write back to user\n");
 
-    ultra_handler(shutdown(connectfile, SHUT_RDWR), NULL, ([&connectfile, &socketfile](){
-        close(connectfile);
-        close(socketfile);
+    //Windows is SD_BOTH, Unix is SHUT_RDWR. Both might be 2...
+    ultra_handler(shutdown(connectfile, 2), NULL, ([&connectfile, &socketfile](){
+        internal_closesocket(connectfile);
+        internal_closesocket(socketfile);
         return -1;
     }));
     fprintf(stderr, "[OK] Connection completed! Closing...\n");
-    close(connectfile);
-    close(socketfile);
+    internal_closesocket(connectfile);
+    internal_closesocket(socketfile);
 
     return auth_ret_code;
 }
@@ -1613,16 +1624,23 @@ int main() {
 
     curl = curl_easy_init();
 
-    #ifdef __linux__ 
+    #ifdef internal_unix_based 
         tret = system( (std::string("xdg-open \"") + authorization_url + '\"').c_str() );
         if(tret != 0) {
             fprintf(stderr, "Error occured, error %d!\n", tret);
             return -1;
         }
     #elif defined(_WIN32)
+        WSADATA wsaData;
+        tret = WSAStartup(MAKEWORD(2,2), &wsaData);
+        if(tret != 0) {
+            fprintf(stderr, "WSAStartup failed: %d\n", tret);
+            return -1;
+        }
+
         CoInitialize(NULL);
         messageboxa_retry:
-        if(ShellExecute(NULL, "open", authorization_url.c_str(), NULL, NULL, SW_SHOWNORMAL); < 32) {
+        if((INT_PTR) ShellExecuteA(NULL, "open", authorization_url.c_str(), NULL, NULL, SW_SHOWNORMAL) < 32) {
             tret = MessageBoxA(NULL, "Operation failed", "Title", MB_RETRYCANCEL | MB_ICONERROR);
             if(tret == IDRETRY) goto messageboxa_retry;
             else if(tret = IDCANCEL) {
@@ -1677,6 +1695,10 @@ int main() {
             fputs("[ERROR] cURL init failed. Panic!\n", stderr);
         }
     }
+
+    #ifdef _WIN32
+    WSACleanup();
+    #endif
 
     return 0;
 }
