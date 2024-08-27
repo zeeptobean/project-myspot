@@ -1043,14 +1043,48 @@ int get_track_feature(const std::string& track_id, audio_feature_data& retdata, 
     return tret;
 }
 
-int get_user_recommendations(const int& limit, const std::string& market, const std::vector<std::string>& seed_artists, const std::vector<std::string>& seed_genres, const std::vector<std::string>& seed_tracks, const recommendations_query_data& rcm, std::vector<track_data>& retvec, std::string *error_string) {
+int get_user_recommendations(const int& limit, const std::string& market, const std::vector<std::string>& seed_artists, const std::vector<std::string>& seed_genres, const std::vector<std::string>& seed_tracks, recommendations_query_data rcm, std::vector<track_data>& retvec, std::string *error_string) {
+    (void) market;
     std::string response_string;
-    std::string api_url = API_ENDPOINT(recommendations);
+    std::string api_url = API_ENDPOINT(recommendations) + "?limit=" + to_string(limit);
+    std::string concatstr;
+    if([&seed_artists, &seed_genres, &seed_tracks](std::string& retstr) {
+        std::string tstr;
+        bool has_seed = false;
+        if(seed_artists.size() > 0) {
+            has_seed = true;
+            tstr += "&seed_artists=";
+            for(int i=0; i < (int) seed_artists.size()-1; i++) tstr = tstr + seed_artists[i] + "%2C";
+            tstr += seed_artists.back();
+        }
+        if(seed_genres.size() > 0) {
+            has_seed = true;
+            tstr += "&seed_genres=";
+            for(int i=0; i < (int) seed_genres.size()-1; i++) tstr = tstr + seed_genres[i] + "%2C";
+            tstr += seed_genres.back();
+        }
+        if(seed_tracks.size() > 0) {
+            has_seed = true;
+            tstr += "&seed_tracks=";
+            for(int i=0; i < (int) seed_tracks.size()-1; i++) tstr = tstr + seed_tracks[i] + "%2C";
+            tstr += seed_tracks.back();
+        }
+        retstr = tstr;
+        return has_seed;
+    }(concatstr)) {
+        api_url += concatstr;
+    } else {
+        if(error_string != NULL) *error_string = "Need at least one seed field to proceed";
+        return -1;
+    }
+    api_url = api_url + '&' + rcm.stringify();
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
     if(postcode == 401) return 0;
     else if(postcode == 200) {
         json pjson = json::parse(response_string);
-        // userdata = private_user_data(pjson);
+        for(auto& dd:pjson.at("tracks")) {
+            retvec.push_back(track_data(dd));
+        }
         return 1;
     }
     return -1;
@@ -1252,6 +1286,11 @@ int get_playlist_items(const std::string& playlist_id, const std::string& market
     (void) market;  (void) field;
     std::string response_string;
     std::string api_url = API_ENDPOINT(playlists/) + playlist_id + "/tracks";
+    std::vector<std::pair<std::string, std::string>> fieldvec {
+        make_pair("offset", std::to_string(offset)),
+        make_pair("limit", std::to_string(limit))
+    };
+    api_url = append_url_field(api_url, fieldvec);
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
     if(postcode == 401) return 0;
     else if(postcode == 200) {
