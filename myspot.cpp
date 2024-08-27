@@ -28,7 +28,9 @@ using json = nlohmann::json;
 #define APP_REDIRECT_URI "https://localhost:62309/callback"
 #define API_ENDPOINT_STRING "https://api.spotify.com/v1/"
 
-#define API_ENDPOINT(x) API_ENDPOINT_STRING#x
+#define API_ENDPOINT(x) std::string(API_ENDPOINT_STRING#x)      //wrapped to prevent unwanted bugs during string concat
+
+#define internal_stringify(x) #x
 
 CURL *curl;
 CURLcode curlres;
@@ -36,21 +38,26 @@ std::string token, refresh_token;
 
 //If the width or/and height is 0, it means spotify didn't supply that parameter
 class image_representation {
-    std::string link;
-    int width, height;
-    bool is_null;
+    std::string link = "";
+    int width = 0, height = 0;
+    bool is_null = 1;
 
     public:
-    image_representation() : width(0), height(0), is_null(1) {};
+    image_representation() = default;
 
     image_representation(const std::string& tlink, const int& twidth, const int& theight) {
-        if(link == "") is_null = 1;
+        image_representation();
+        if(tlink == "") is_null = 1;
         else {
             this->link = tlink;
             this->width = twidth;
             this->height = theight;
             is_null = 0;
         }
+    }
+
+    image_representation(const json& pjson) {
+        image_representation(pjson.at("url"), pjson.at("width"), pjson.at("height"));
     }
 
     //return 0 if image is null
@@ -63,7 +70,7 @@ class image_representation {
     }
 };
 
-class multipage_query {
+struct multipage_query {
     std::string response_url_next_page, response_url_prev_page, response_url_cur_page;
     int32_t response_limit, response_offset;
 
@@ -81,6 +88,7 @@ class multipage_query {
         response_limit = pjson.at("limit");
     }
 
+    /*
     //return 0 if fail, 1 if success and internal state modified
     int load_prev_tracks_page(json& return_json) {
         return 0;
@@ -95,6 +103,7 @@ class multipage_query {
     int load_current_tracks_page(json& return_json) {
         return 0;
     }
+    */
 };
 
 //Would not implement audio analysis, too much data
@@ -122,7 +131,7 @@ class audio_feature_data {
     void set_data(const json& pjson, const std::string& track_id = "") {
         id = track_id == "" ? af_track_id_from_href(pjson.at("track_href")) : track_id;
         duration_ms = pjson.at("duration_ms");
-        is_major = pjson.at("mode");
+        is_major = (int) pjson.at("mode");
         key = pjson.at("key");
         time_signature = pjson.at("time_signature");
         tempo = pjson.at("tempo");
@@ -136,13 +145,27 @@ class audio_feature_data {
         valence = pjson.at("valence");
     }
 
-    std::string get_track_key() {
+    //Only major/minor is supported
+    std::string get_track_scale() {
         const std::string audio_feature_key_name[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
         std::string keystr, modestr;
         modestr = is_major ? " Major" : " Minor";
         keystr = key == -1 ? "Undetected" : audio_feature_key_name[key];  //can be branchless
         return keystr + modestr;
     }
+
+    const std::string& get_id() const {return id;}
+    const long long& get_duration_ms() const {return duration_ms;}
+    const int& get_time_signature() const {return time_signature;}
+    const float& get_tempo() const {return tempo;}
+    const float& get_loudness() const {return loudness;}
+    const float& get_acousticness() const {return acousticness;}
+    const float& get_danceability() const {return danceability;}
+    const float& get_energy() const {return energy;}
+    const float& get_instrumentalness() const {return instrumentalness;}
+    const float& get_liveness() const {return liveness;}
+    const float& get_speechiness() const {return speechiness;}
+    const float& get_valence() const {return valence;}
 };
 
 class simplified_artist_data {
@@ -183,6 +206,7 @@ class artist_data : public simplified_artist_data {
         follower = pjson.at("followers").at("total");
         genres = pjson.at("genres");
         id = pjson.at("id");
+        popularity = pjson.at("popularity");
         if(pjson.at("images").size() != 0) {
             const auto& firstim = pjson.at("images").front();
             image = image_representation(firstim.at("url"), firstim.at("width"), firstim.at("height"));
@@ -221,7 +245,7 @@ class simplified_track_data {
         }
         disc_number = pjson.at("disc_number");
         track_number = pjson.at("track_number");
-        restrictions = pjson.at("restrictions").at("reason");
+        restrictions = pjson.contains("restrictions") ? pjson.at("restrictions").at("reason") : "";
         preview_url = pjson.at("preview_url").is_null() ? "" : pjson.at("preview_url");
         is_explicit = pjson.at("explicit");
         duration_ms = pjson.at("duration_ms");
@@ -245,6 +269,7 @@ class simplified_track_data {
     const std::string& get_restrictions() const {return restrictions;}
     const std::string& get_preview_url() const {return preview_url;}
     const audio_feature_data& get_audio_feature() const {return audio_feature;}
+    const std::vector<simplified_artist_data>& get_artists() const {return artists;}
 };
 
 class simplified_album_data {
@@ -277,7 +302,7 @@ class simplified_album_data {
         }
         release_date = pjson.at("release_date");
         release_date_precision = pjson.at("release_date_precision");
-        restrictions = pjson.at("restrictions").at("reason");
+        restrictions = pjson.contains("restrictions") ? pjson.at("restrictions").at("reason") : "";
         for(auto& ele:pjson.at("artists")) {
             artists.push_back(simplified_artist_data(ele));
         }
@@ -365,6 +390,7 @@ class album_data : public simplified_album_data {
     const std::vector<std::string>& get_copyrights() const {return copyrights;}
     const std::vector<std::string>& get_genres() const {return genres;}
     const int32_t& get_popularity() const {return popularity;}
+    const std::vector<simplified_track_data>& get_tracks() const {return items;}
 };
 
 class user_data {
@@ -387,6 +413,10 @@ class user_data {
         follower = pjson.at("followers").at("total");
         for(auto& ele:pjson.at("images")) {
             image_vec.push_back(image_representation(ele.at("url"), ele.at("width"), ele.at("height")));
+            // std::string turl = ele.at("url");
+            // int tw = ele.at("width");
+            // int th = ele.at("height");
+            // image_vec.push_back(image_representation(turl, tw, th));
         }
         sort(image_vec.begin(), image_vec.end(), [](const image_representation& a, const image_representation& b) {
             //welp shit api design
@@ -450,6 +480,10 @@ class playlist_track_data {
             item = track_data(pjson.at("track"));
         } else is_track = 0;
     }
+
+    const std::string& get_added_time() const {return added_time;}
+    const user_data& get_added_user() const {return added_user;}
+    const track_data& get_track() const {return item;}
 };
 
 class simplified_playlist_data {
@@ -481,6 +515,17 @@ class simplified_playlist_data {
             image = image_representation(firstim.at("url"), firstim.at("width"), firstim.at("height"));
         }
     }
+
+    const bool& get_collab_on() const {return is_collab;}
+    const bool& get_public_on() const {return is_public;}
+    const std::string& get_description() const {return description;}
+    const std::string& get_snapshot_id() const {return snapshot_id;}
+    const std::string& get_name() const {return name;}
+    const std::string& get_url() const {return url;}
+    const std::string& get_id() const {return id;}
+    const image_representation& get_image() const {return image;}
+    const user_data& get_owner() const {return owner;}
+    const long long& get_tracks_count() const {return tracks_count;}
 };
 
 class playlist_data : public simplified_playlist_data {
@@ -500,6 +545,9 @@ class playlist_data : public simplified_playlist_data {
             items.push_back(playlist_track_data(ele));
         }
     }
+
+    const long long& get_follower() const {return follower;}
+    const std::vector<playlist_track_data>& get_tracks() const {return items;}
 };
 
 class category_data {
@@ -566,6 +614,54 @@ struct recommendations_query_data {
         //integer value would be -1
         memset(this, -1, sizeof(*this));
     };
+
+    std::string stringify() {
+        std::string str;
+        //welp too long
+        if(min_duration_ms != -1) str = str + internal_stringify(min_duration_ms) + '=' + std::to_string(min_duration_ms) + '&';
+        if(max_duration_ms != -1) str = str + internal_stringify(max_duration_ms) + '=' + std::to_string(max_duration_ms) + '&';
+        if(target_duration_ms != -1) str = str + internal_stringify(target_duration_ms) + '=' + std::to_string(target_duration_ms) + '&';
+        if(min_key != -1) str = str + internal_stringify(min_key) + '=' + std::to_string(min_key) + '&';
+        if(max_key != -1) str = str + internal_stringify(max_key) + '=' + std::to_string(max_key) + '&';
+        if(target_key != -1) str = str + internal_stringify(target_key) + '=' + std::to_string(target_key) + '&';
+        if(min_mode != -1) str = str + internal_stringify(min_mode) + '=' + std::to_string(min_mode) + '&';
+        if(max_mode != -1) str = str + internal_stringify(max_mode) + '=' + std::to_string(max_mode) + '&';
+        if(target_mode != -1) str = str + internal_stringify(target_mode) + '=' + std::to_string(target_mode) + '&';
+        if(min_time_signature != -1) str = str + internal_stringify(min_time_signature) + '=' + std::to_string(min_time_signature) + '&';
+        if(max_time_signature != -1) str = str + internal_stringify(max_time_signature) + '=' + std::to_string(max_time_signature) + '&';
+        if(target_time_signature != -1) str = str + internal_stringify(target_time_signature) + '=' + std::to_string(target_time_signature) + '&';
+        if(min_popularity != -1) str = str + internal_stringify(min_popularity) + '=' + std::to_string(min_popularity) + '&';
+        if(max_popularity != -1) str = str + internal_stringify(max_popularity) + '=' + std::to_string(max_popularity) + '&';
+        if(target_popularity != -1) str = str + internal_stringify(target_popularity) + '=' + std::to_string(target_popularity) + '&';
+        if(min_tempo != -1) str = str + internal_stringify(min_tempo) + '=' + std::to_string(min_tempo) + '&';
+        if(max_tempo != -1) str = str + internal_stringify(max_tempo) + '=' + std::to_string(max_tempo) + '&';
+        if(target_tempo != -1) str = str + internal_stringify(target_tempo) + '=' + std::to_string(target_tempo) + '&';
+        if(!std::isnan(min_acousticness)) str = str + internal_stringify(min_acousticness) + '=' + std::to_string(min_acousticness) + '&';
+        if(!std::isnan(max_acousticness)) str = str + internal_stringify(max_acousticness) + '=' + std::to_string(max_acousticness) + '&';
+        if(!std::isnan(target_acousticness)) str = str + internal_stringify(target_acousticness) + '=' + std::to_string(target_acousticness) + '&';
+        if(!std::isnan(min_danceability)) str = str + internal_stringify(min_danceability) + '=' + std::to_string(min_danceability) + '&';
+        if(!std::isnan(max_danceability)) str = str + internal_stringify(max_danceability) + '=' + std::to_string(max_danceability) + '&';
+        if(!std::isnan(target_danceability)) str = str + internal_stringify(target_danceability) + '=' + std::to_string(target_danceability) + '&';
+        if(!std::isnan(min_energy)) str = str + internal_stringify(min_energy) + '=' + std::to_string(min_energy) + '&';
+        if(!std::isnan(max_energy)) str = str + internal_stringify(max_energy) + '=' + std::to_string(max_energy) + '&';
+        if(!std::isnan(target_energy)) str = str + internal_stringify(target_energy) + '=' + std::to_string(target_energy) + '&';
+        if(!std::isnan(min_instrumentalness)) str = str + internal_stringify(min_instrumentalness) + '=' + std::to_string(min_instrumentalness) + '&';
+        if(!std::isnan(max_instrumentalness)) str = str + internal_stringify(max_instrumentalness) + '=' + std::to_string(max_instrumentalness) + '&';
+        if(!std::isnan(target_instrumentalness)) str = str + internal_stringify(target_instrumentalness) + '=' + std::to_string(target_instrumentalness) + '&';
+        if(!std::isnan(min_liveness)) str = str + internal_stringify(min_liveness) + '=' + std::to_string(min_liveness) + '&';
+        if(!std::isnan(max_liveness)) str = str + internal_stringify(max_liveness) + '=' + std::to_string(max_liveness) + '&';
+        if(!std::isnan(target_liveness)) str = str + internal_stringify(target_liveness) + '=' + std::to_string(target_liveness) + '&';
+        if(!std::isnan(min_loudness)) str = str + internal_stringify(min_loudness) + '=' + std::to_string(min_loudness) + '&';
+        if(!std::isnan(max_loudness)) str = str + internal_stringify(max_loudness) + '=' + std::to_string(max_loudness) + '&';
+        if(!std::isnan(target_loudness)) str = str + internal_stringify(target_loudness) + '=' + std::to_string(target_loudness) + '&';
+        if(!std::isnan(min_speechiness)) str = str + internal_stringify(min_speechiness) + '=' + std::to_string(min_speechiness) + '&';
+        if(!std::isnan(max_speechiness)) str = str + internal_stringify(max_speechiness) + '=' + std::to_string(max_speechiness) + '&';
+        if(!std::isnan(target_speechiness)) str = str + internal_stringify(target_speechiness) + '=' + std::to_string(target_speechiness) + '&';
+        if(!std::isnan(min_valence)) str = str + internal_stringify(min_valence) + '=' + std::to_string(min_valence) + '&';
+        if(!std::isnan(max_valence)) str = str + internal_stringify(max_valence) + '=' + std::to_string(max_valence) + '&';
+        if(!std::isnan(target_valence)) str = str + internal_stringify(target_valence) + '=' + std::to_string(target_valence) + '&';
+        return str;
+    }
 };
 
 int internal_closesocket(int socket) {
@@ -576,9 +672,9 @@ int internal_closesocket(int socket) {
     #endif
 }
 
-size_t onetime_post_response(char *ptr, size_t charsz, size_t strsz, void *_stdstringret) {
+size_t do_post_response(char *ptr, size_t charsz, size_t strsz, void *_stdstringret) {
     (void) charsz;  //set unused
-    *((string*)  _stdstringret) = std::string(ptr, strsz);
+    *((string*)  _stdstringret) += std::string(ptr, strsz);
     return strsz;
 }
 
@@ -626,6 +722,18 @@ std::string translate_curl_error(const CURLcode& code) {
     return std::string("curl failed, error ") + curl_easy_strerror(code);
 }
 
+//maximum 5k characters
+void internal_printdebug(const char *myformat, ...) {
+    char tbuf[5007];
+    va_list arg;
+	va_start(arg, myformat);
+    vsnprintf(tbuf, 5000, myformat, arg);
+    va_end(arg);
+
+    //append color
+    fprintf(stderr, "\n\033[36;1m%s\033[0m\n", tbuf);
+}
+
 //GET annd POST wrapper
 //@param post_or_get 1 for post, 0 for get
 //@param url url to POST to. URL could have body embed
@@ -651,7 +759,8 @@ int inapp_post_or_get(int post_or_get, const std::string& url, const std::vector
     if(post_field.size() > 0) curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_field.c_str());
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, post_or_get);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onetime_post_response);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, do_post_response);
+    response.clear();
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     
     curlres = curl_easy_perform(curl);
@@ -694,6 +803,7 @@ int inapp_post(const std::string& url, const std::vector<std::string>& header_ov
     return inapp_post_or_get(1, url, header_override, post_field, response, error_string);
 }
 
+//whoops post_field isn't needed :eyes:
 int inapp_get(const std::string& url, const std::vector<std::string>& header_override, const std::string& post_field, std::string& response, std::string *error_string) {
     return inapp_post_or_get(0, url, header_override, post_field, response, error_string);
 }
@@ -716,7 +826,7 @@ int get_artist(const string& artist_id, artist_data& retdata, std::string *error
 //maximum 50 elements!
 int get_artists(const std::vector<std::string>& artists_id, std::vector<artist_data>& retvec, std::string *error_string) {
     std::string response_string;
-    std::string artists_api_url = API_ENDPOINT(artists) + '?';
+    std::string artists_api_url = API_ENDPOINT(artists) + "?ids=";
     if(artists_id.size() == 0) {
         if(error_string != NULL) *error_string = "artists_id vector can't be empty";
         return -1;
@@ -777,6 +887,7 @@ int get_artist_albums(const std::string& artist_id, const std::string& include_g
 }
 
 int get_artist_top_tracks(const std::string& artist_id, const std::string& market, std::vector<track_data>& retvec, std::string *error_string) {
+    (void) market;
     std::string response_string;
     std::string api_url = API_ENDPOINT(artists) + '/' + artist_id + '/' + "top-tracks";
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
@@ -793,6 +904,7 @@ int get_artist_top_tracks(const std::string& artist_id, const std::string& marke
 }
 
 int get_artist_related_artists(const std::string& artist_id, const std::string& market, std::vector<artist_data>& retvec, std::string *error_string) {
+    (void) market;
     std::string response_string;
     std::string api_url = API_ENDPOINT(artists) + '/' + artist_id + '/' + "related-artists";
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
@@ -880,7 +992,7 @@ int get_user_saved_tracks(const std::string& market, const int& limit, const int
 //ew
 int check_tracks_saved(const std::vector<std::string>& tracks_id, std::vector<bool>& retvec, std::string *error_string) {
     std::string response_string;
-    std::string api_url = API_ENDPOINT(me/tracks/contains) + '?';
+    std::string api_url = API_ENDPOINT(me/tracks/contains) + "?ids=";
     if(tracks_id.size() == 0) {
         if(error_string != NULL) *error_string = "tracks_id vector can't be empty";
         return -1;
@@ -901,7 +1013,7 @@ int check_tracks_saved(const std::vector<std::string>& tracks_id, std::vector<bo
 
 int get_tracks_feature(const std::vector<std::string>& tracks_id, std::vector<audio_feature_data>& retvec, std::string *error_string) {
     std::string response_string;
-    std::string api_url = API_ENDPOINT(audio_features) + '?';
+    std::string api_url = API_ENDPOINT(audio-features) + "?ids=";
     if(tracks_id.size() == 0) {
         if(error_string != NULL) *error_string = "tracks_id vector can't be empty";
         return -1;
@@ -932,6 +1044,15 @@ int get_track_feature(const std::string& track_id, audio_feature_data& retdata, 
 }
 
 int get_user_recommendations(const int& limit, const std::string& market, const std::vector<std::string>& seed_artists, const std::vector<std::string>& seed_genres, const std::vector<std::string>& seed_tracks, const recommendations_query_data& rcm, std::vector<track_data>& retvec, std::string *error_string) {
+    std::string response_string;
+    std::string api_url = API_ENDPOINT(recommendations);
+    int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
+    if(postcode == 401) return 0;
+    else if(postcode == 200) {
+        json pjson = json::parse(response_string);
+        // userdata = private_user_data(pjson);
+        return 1;
+    }
     return -1;
 }
 
@@ -979,6 +1100,7 @@ int get_current_user_top_tracks(const std::string& time_range_str, const int& li
         for(auto& ele:parsed_json.at("items")) {
             retvec.push_back(track_data(ele));
         }
+        return 1;
     }
     return -1;
 }
@@ -1001,6 +1123,7 @@ int get_current_user_top_artists(const std::string& time_range_str, const int& l
         for(auto& ele:parsed_json.at("items")) {
             retvec.push_back(artist_data(ele));
         }
+        return 1;
     }
     return -1;
 }
@@ -1009,6 +1132,45 @@ int get_current_user_top_artists(const std::string& time_range_str, const int& l
 int get_current_user_followed_artists(const std::string& request_id_after, const int& limit, std::vector<artist_data>& retvec, multipage_query& next_query, std::string *error_string) {
     std::string response_string;
     std::string api_url = API_ENDPOINT(me/following);
+    std::vector<std::pair<std::string, std::string>> fieldvec {
+        make_pair("type", "artist"),
+        make_pair("limit", std::to_string(limit)),
+        make_pair("after", request_id_after),
+    };
+    api_url = append_url_field(api_url, fieldvec);
+    int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
+    if(postcode == 401) return 0;
+    else if(postcode == 200) {
+        json parsed_json = json::parse(response_string);
+        parsed_json = parsed_json.at("artists");
+        next_query.set_data(parsed_json);
+        retvec.clear();
+        for(auto& ele:parsed_json.at("items")) {
+            retvec.push_back(artist_data(ele));
+        }
+    }
+    return -1;
+}
+
+//First function to utilize next (and prev) field of multipage_query
+//Made due to unusual design (no offset) of get_current_user_followed_artists(...) function
+//@param next_query Object use for next query. Auto modify on ssuccess.
+//@param retvec C++ vector returning artist data
+//@param error_string Pass C++ string for further error message
+//@return 1 if success, 0 if authorization required, -1 if fail
+int get_current_user_followed_artists_nextquery(multipage_query& next_query, std::vector<artist_data>& retvec, std::string *error_string) {
+    std::string response_string;
+    int postcode = inapp_get(next_query.response_url_next_page, {prepare_authorized_header()}, "", response_string, error_string);
+    if(postcode == 401) return 0;
+    else if(postcode == 200) {
+        json parsed_json = json::parse(response_string);
+        parsed_json = parsed_json.at("artists");
+        next_query.set_data(parsed_json);
+        retvec.clear();
+        for(auto& ele:parsed_json.at("items")) {
+            retvec.push_back(artist_data(ele));
+        }
+    }
     return -1;
 }
 
@@ -1212,7 +1374,30 @@ int get_category_playlists(const category_data& category, const int& limit, cons
 }
 
 //ew
-int get_playlist_cover_image(const std::string& playlist_id, image_representation& retdata, std::string *error_string) {
+int get_playlist_cover_image(const std::string& playlist_id, std::vector<image_representation>& retvec, std::string *error_string) {
+    std::string response_string;
+    std::string api_url = API_ENDPOINT(playlists/) + playlist_id + "/images";
+    int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
+    if(postcode == 401) return 0;
+    else if(postcode == 200) {
+        json parsed_json = json::parse(response_string);
+        retvec.clear();
+        for(auto& ele:parsed_json) {
+            retvec.push_back(image_representation(ele));
+        }
+
+        //Guarentee the first image always the biggest
+        sort(retvec.begin(), retvec.end(), [](const image_representation& a, const image_representation& b) {
+            //welp shit api design
+            int aw, ah, bw, bh;
+            std::string st;
+            a.get_image(st, aw, ah);
+            b.get_image(st, bw, bh);
+            return (long long) aw*ah > (long long) bw*bh;
+        });
+
+        return 1;
+    }
     return -1;
 }
 
@@ -1252,7 +1437,7 @@ int get_category(const std::string& category_id, const std::string& locale_str, 
         retdata.set_data(parsed_json);
         return 10;
     } else if(postcode == 404) {
-        memset(&retdata, 0, sizeof(category_data));     //side-effect lul
+        // memset(&retdata, 0, sizeof(category_data));     //side-effect lul
         return -10;
     }
     return -1;
@@ -1260,6 +1445,15 @@ int get_category(const std::string& category_id, const std::string& locale_str, 
 
 //ew
 int get_available_market(std::vector<std::string>& retvec, std::string *error_string) {
+    std::string response_string;
+    std::string api_url = API_ENDPOINT(markets);
+    int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
+    if(postcode == 401) return 0;
+    else if(postcode == 200) {
+        json parsed_json = json::parse(response_string);
+        retvec = parsed_json.at("markets");
+        return 1;
+    }
     return -1;
 }
 
@@ -1273,6 +1467,12 @@ int search_for_item(const std::string& query_str, const std::vector<std::string>
         make_pair("q", query_str),
         make_pair("limit", std::to_string(limit)),
         make_pair("offset", std::to_string(offset)),
+        [&query_type](){
+            std::string tmp;
+            for(auto& s:query_type) tmp = tmp + s + ',';
+            tmp.pop_back();
+            return make_pair("type", tmp);
+        }()
     };
     api_url = append_url_field(api_url, fieldvec);
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
@@ -1321,7 +1521,7 @@ int abnormal_client_credential_auth() {
         string tmp = prepare_client_credentials_token_request();
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, tmp.c_str());
         curl_easy_setopt(curl, CURLOPT_POST, 1);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onetime_post_response);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, do_post_response);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &postres);
         res = curl_easy_perform(curl);
 
@@ -1612,6 +1812,7 @@ std::string prepare_authorization_pkce_token_request(const std::string& auth_cod
     return ret;
 }
 
+/*
 int main() {
     std::string code_verifier = prepare_code_verifier(64);
     std::string generated_state;
@@ -1701,4 +1902,4 @@ int main() {
     #endif
 
     return 0;
-}
+*/
