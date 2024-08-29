@@ -56,8 +56,12 @@ class image_representation {
         }
     }
 
+    //spotify can supply images with null width and height. If data is json one should call this instead
     image_representation(const json& pjson) {
-        image_representation(pjson.at("url"), pjson.at("width"), pjson.at("height"));
+        std::string turl = pjson.at("url");
+        int tw = pjson.at("width").is_null() ? 0 : (int) pjson.at("width");
+        int th = pjson.at("height").is_null() ? 0 : (int) pjson.at("height");
+        image_representation(turl, tw, th);
     }
 
     //return 0 if image is null
@@ -82,9 +86,9 @@ struct multipage_query {
 
     void set_data(const json& pjson) {
         response_url_cur_page = pjson.at("href");
-        response_url_prev_page = pjson.at("previous").is_null() ? "" : pjson.at("previous");
-        response_url_next_page = pjson.at("next").is_null() ? "" : pjson.at("next");
-        response_offset = pjson.at("offset");
+        if(pjson.contains("previous")) response_url_prev_page = pjson.at("previous").is_null() ? "" : pjson.at("previous");
+        if(pjson.contains("next")) response_url_next_page = pjson.at("next").is_null() ? "" : pjson.at("next");
+        if(pjson.contains("offset")) response_offset = pjson.at("offset");
         response_limit = pjson.at("limit");
     }
 
@@ -209,7 +213,7 @@ class artist_data : public simplified_artist_data {
         popularity = pjson.at("popularity");
         if(pjson.at("images").size() != 0) {
             const auto& firstim = pjson.at("images").front();
-            image = image_representation(firstim.at("url"), firstim.at("width"), firstim.at("height"));
+            image = image_representation(firstim);
         }
     }
 
@@ -298,7 +302,7 @@ class simplified_album_data {
         }
         if(pjson.at("images").size() != 0) {
             const auto& firstim = pjson.at("images").front();
-            image = image_representation(firstim.at("url"), firstim.at("width"), firstim.at("height"));
+            image = image_representation(firstim);
         }
         release_date = pjson.at("release_date");
         release_date_precision = pjson.at("release_date_precision");
@@ -410,22 +414,21 @@ class user_data {
         name = pjson.at("display_name").is_null() ? "" : pjson.at("display_name");
         url = pjson.at("external_urls").at("spotify");
         id = pjson.at("id");
-        follower = pjson.at("followers").at("total");
-        for(auto& ele:pjson.at("images")) {
-            image_vec.push_back(image_representation(ele.at("url"), ele.at("width"), ele.at("height")));
-            // std::string turl = ele.at("url");
-            // int tw = ele.at("width");
-            // int th = ele.at("height");
-            // image_vec.push_back(image_representation(turl, tw, th));
+        //web api at aug 28 24 get current user's playlist missing "followers" and "images" field on album owner!
+        follower = pjson.contains("followers") ? (long long) pjson.at("followers").at("total") : -1;
+        if(pjson.contains("images")) {
+            for(auto& ele:pjson.at("images")) {
+                image_vec.push_back(image_representation(ele));
+            }
+            sort(image_vec.begin(), image_vec.end(), [](const image_representation& a, const image_representation& b) {
+                //welp shit api design
+                int aw, ah, bw, bh;
+                std::string st;
+                a.get_image(st, aw, ah);
+                b.get_image(st, bw, bh);
+                return (long long) aw*ah > (long long) bw*bh;
+            });
         }
-        sort(image_vec.begin(), image_vec.end(), [](const image_representation& a, const image_representation& b) {
-            //welp shit api design
-            int aw, ah, bw, bh;
-            std::string st;
-            a.get_image(st, aw, ah);
-            b.get_image(st, bw, bh);
-            return (long long) aw*ah > (long long) bw*bh;
-        });
     }
 
     const std::string& get_id() const {return id;}
@@ -503,16 +506,16 @@ class simplified_playlist_data {
     void set_data(const json& pjson) {
         is_collab = pjson.at("collaborative");
         is_public = pjson.at("public");
-        description = pjson.at("description");
+        description = pjson.at("description").is_null()? "" : pjson.at("description");
         snapshot_id = pjson.at("snapshot_id");
-        name = pjson.at("display_name");
+        name = pjson.at("name");
         url = pjson.at("external_urls").at("spotify");
         id = pjson.at("id");
         tracks_count = pjson.at("tracks").at("total");
         owner.set_data(pjson.at("owner"));
         if(pjson.at("images").size() != 0) {
             const auto& firstim = pjson.at("images").front();
-            image = image_representation(firstim.at("url"), firstim.at("width"), firstim.at("height"));
+            image = image_representation(firstim);
         }
     }
 
@@ -562,7 +565,7 @@ class category_data {
 
     void set_data(const json& pjson) {
         for(auto& ele:pjson.at("images")) {
-            image_vec.push_back(image_representation(ele.at("url"), ele.at("width"), ele.at("height")));
+            image_vec.push_back(image_representation(ele));
         }
         sort(image_vec.begin(), image_vec.end(), [](const image_representation& a, const image_representation& b) {
             //welp shit api design
@@ -1169,12 +1172,13 @@ int get_current_user_followed_artists(const std::string& request_id_after, const
     std::vector<std::pair<std::string, std::string>> fieldvec {
         make_pair("type", "artist"),
         make_pair("limit", std::to_string(limit)),
-        make_pair("after", request_id_after),
     };
+    if(request_id_after != "") fieldvec.push_back(make_pair("after", request_id_after));
     api_url = append_url_field(api_url, fieldvec);
     int postcode = inapp_get(api_url, {prepare_authorized_header()}, "", response_string, error_string);
     if(postcode == 401) return 0;
     else if(postcode == 200) {
+        //rather weird, added some check
         json parsed_json = json::parse(response_string);
         parsed_json = parsed_json.at("artists");
         next_query.set_data(parsed_json);
@@ -1182,6 +1186,7 @@ int get_current_user_followed_artists(const std::string& request_id_after, const
         for(auto& ele:parsed_json.at("items")) {
             retvec.push_back(artist_data(ele));
         }
+        return 1;
     }
     return -1;
 }
@@ -1204,6 +1209,7 @@ int get_current_user_followed_artists_nextquery(multipage_query& next_query, std
         for(auto& ele:parsed_json.at("items")) {
             retvec.push_back(artist_data(ele));
         }
+        return 1;
     }
     return -1;
 }
@@ -1211,7 +1217,7 @@ int get_current_user_followed_artists_nextquery(multipage_query& next_query, std
 //ew
 int check_current_user_followed_artists(const std::vector<std::string>& artists_id, std::vector<bool>& retvec, std::string *error_string) {
     std::string response_string;
-    std::string api_url = API_ENDPOINT(me/following/contains?type=artist&);
+    std::string api_url = API_ENDPOINT(me/following/contains?type=artist&ids=);
     if(artists_id.size() == 0) {
         if(error_string != NULL) *error_string = "artists_id vector can't be empty";
         return -1;
@@ -1233,7 +1239,7 @@ int check_current_user_followed_artists(const std::vector<std::string>& artists_
 //ew
 int check_current_user_followed_users(const std::vector<std::string>& users_id, std::vector<bool>& retvec, std::string *error_string) {
     std::string response_string;
-    std::string api_url = API_ENDPOINT(me/following/contains?type=user&);
+    std::string api_url = API_ENDPOINT(me/following/contains?type=user&ids=);
     if(users_id.size() == 0) {
         if(error_string != NULL) *error_string = "users_id vector can't be empty";
         return -1;
@@ -1318,6 +1324,8 @@ int get_current_user_playlists(const int& limit, const int& offset, std::vector<
         json parsed_json = json::parse(response_string);
         next_query = multipage_query(parsed_json);
         retvec.clear();
+        //web api at aug 28 24 missing "followers" and "images" field on album owner!
+        //also primary_color is presented, might use later? 
         for(auto& ele:parsed_json.at("items")) {
             retvec.push_back(simplified_playlist_data(ele));
         }
