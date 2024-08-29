@@ -126,6 +126,40 @@ void test_self() {
         puts("");
     } else printf("check_tracks_saved failed. Error string: %s\n", error_string.c_str());
 
+    if(check_current_user_followed_artists({"164Uj4eKjl6zTBKfJLFKKK", "7CajNmpbOovFoOoasH2HaY", "1vCWHaC5f2uS3yhpwWbIA6"}, boolvec, &error_string) == 1) {
+        puts("Check if you followed these artists...");
+        printf("JVKE: %s\n", boolvec[0] ? "yes" : "no");
+        printf("Calvin Harris: %s\n", boolvec[1] ? "yes" : "no");
+        printf("Avicii: %s\n", boolvec[2] ? "yes" : "no");
+        puts("");
+    } else printf("check_current_user_followed_artists failed. Error string: %s\n", error_string.c_str());
+
+    puts("Some artists you follow:");
+    if(get_current_user_followed_artists("", 4, artist_vec, next_query, &error_string) == 1) {
+        for(auto& ad:artist_vec) printf("%s\n", ad.get_name().c_str());
+    } else printf("get_current_user_followed_artists failed. Error string: %s\n", error_string.c_str());
+    if(get_current_user_followed_artists_nextquery(next_query, artist_vec, &error_string) == 1) {
+        for(auto& ad:artist_vec) printf("%s\n", ad.get_name().c_str());
+    } else printf("get_current_user_followed_artists_nextquery failed. Error string: %s\n", error_string.c_str());
+    puts("");
+
+    std::vector<simplified_playlist_data> simple_playlist_vec;
+    if(get_current_user_playlists(5, 4, simple_playlist_vec, next_query, &error_string) == 1) {
+        puts("Some of your playlists:");
+        for(auto& spd:simple_playlist_vec) {
+            printf("%s %s playlist: %s\nDescription: %s\n%lld tracks\n", spd.get_public_on() ? "Public" : "Private",
+                                                            spd.get_collab_on() ? "collab" : "",
+                                                            spd.get_name().c_str(), spd.get_description().c_str(),
+                                                            spd.get_tracks_count());
+        }
+        puts("");
+    } else printf("get_current_user_playlists failed. Error string: %s\n", error_string.c_str());
+
+    if(check_current_user_followed_users({"7jgqv32g941xgbruat5h9qxbw"}, boolvec, NULL) == 1) {
+        printf("did you followed one of creator's friends NCSncd.?: %s", boolvec[0] ? "yes" : "no"); 
+    } else puts("check_current_user_followed_users failed");
+
+
     printf("\nEND self test\n");
 }
 
