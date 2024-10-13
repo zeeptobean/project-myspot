@@ -23,9 +23,9 @@
 using namespace std;
 using json = nlohmann::json; 
 
-#define APP_CLIENT_ID "41901dc7043b43e0a39cffab20f3b08e"
-#define APP_CLIENT_SECRET "308547ce60e04601977c15753ec877b6"
-#define APP_REDIRECT_URI "https://localhost:62309/callback"
+#define APP_CLIENT_ID 
+#define APP_CLIENT_SECRET
+#define APP_REDIRECT_URI 
 #define API_ENDPOINT_STRING "https://api.spotify.com/v1/"
 
 #define API_ENDPOINT(x) std::string(API_ENDPOINT_STRING#x)      //wrapped to prevent unwanted bugs during string concat
